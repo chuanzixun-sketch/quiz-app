@@ -33,9 +33,10 @@ jobs:
       - name: Build APK
         run: |
           flet build apk \
-            --app-name "刷题" \
-            --app-identifier "com.quiz.app" \
-            --include-packages "$(cat requirements.txt | tr '\n' ' ')" \
+            --org "com.quiz.app" \
+            --product "刷题" \
+            --build-version "1.0.0" \
+            --build-number 1 \
             main.py
 
       - name: Upload APK artifact

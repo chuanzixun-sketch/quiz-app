@@ -1,0 +1,48 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches: [main]
+    paths:
+      - 'main.py'
+      - 'questions.xls'
+      - 'requirements.txt'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build APK
+        run: |
+          flet build apk \
+            --project quiz-app \
+            --product "刷题" \
+            --org com.quiz \
+            --bundle-id com.quiz.app \
+            --compile-app \
+            --yes
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-app-release
+          path: build/apk/*.apk
+          retention-days: 30

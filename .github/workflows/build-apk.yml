@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Show flet build help
+        run: flet build apk --help
+
       - name: Build APK
         run: |
           flet build apk \
@@ -37,7 +40,7 @@ jobs:
             --product "刷题" \
             --build-version "1.0.0" \
             --build-number 1 \
-            main.py
+            --module-name main
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

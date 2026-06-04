@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>刷题 App</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  min-height: 100vh;
+  display: flex; justify-content: center; align-items: flex-start; padding: 0;
+}
+.app {
+  width: 100%; max-width: 480px; min-height: 100vh;
+  background: #fff; display: flex; flex-direction: column;
+  box-shadow: 0 0 20px rgba(0,0,0,0.05);
+}
+
+/* 头部信息栏 */
+.header {
+  background: #f0f0f5; padding: 12px 16px; display: flex;
+  justify-content: space-between; align-items: flex-start; flex-wrap: wrap;
+}
+.header .topic { font-size: 14px; font-weight: 600; color: #007aff; }
+.header .difficulty { font-size: 12px; color: #8e8e93; }
+.header .progress-text { font-size: 14px; font-weight: 600; color: #1d1d1f; }
+.progress-bar-outer {
+  height: 5px; background: #e5e5ea; width: 100%;
+}
+.progress-bar-inner {
+  height: 100%; background: #007aff; transition: width 0.3s;
+}
+
+/* 内容区 */
+.content {
+  flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column;
+  gap: 14px;
+}
+.qtype-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #e8f0fe; color: #007aff; padding: 4px 12px;
+  border-radius: 20px; font-size: 12px; font-weight: 600; align-self: flex-start;
+}
+.stem {
+  font-size: 17px; font-weight: 600; line-height: 1.6; color: #1d1d1f;
+}
+.option-btn {
+  display: block; width: 100%; text-align: left; padding: 14px 16px;
+  border: 2px solid #e5e5ea; border-radius: 12px; background: #fff;
+  font-size: 15px; color: #1d1d1f; cursor: pointer; transition: all 0.15s;
+  line-height: 1.5;
+}
+.option-btn:hover { border-color: #007aff; background: #f0f7ff; }
+.option-btn:disabled { cursor: default; opacity: 0.85; }
+.option-btn.correct { border-color: #34c759; background: #e8f8ed; color: #1d7a34; }
+.option-btn.wrong { border-color: #ff3b30; background: #ffeaea; color: #c41e1e; }
+
+/* 解析区 */
+.explanation-box {
+  background: #f9f9fb; border-radius: 12px; padding: 16px;
+  border-left: 4px solid #007aff; display: none;
+}
+.explanation-box.show { display: block; }
+.explanation-box h4 { font-size: 14px; color: #007aff; margin-bottom: 6px; }
+.explanation-box p { font-size: 14px; color: #3c3c43; line-height: 1.6; }
+
+/* 完成界面 */
+.completion {
+  text-align: center; padding: 40px 20px; display: none; flex-direction: column;
+  gap: 16px; align-items: center;
+}
+.completion.show { display: flex; }
+.completion .icon { font-size: 64px; }
+.completion .title { font-size: 22px; font-weight: 700; }
+.completion .detail { font-size: 14px; color: #8e8e93; line-height: 1.8; }
+.completion .restart-btn {
+  padding: 12px 32px; background: #007aff; color: #fff; border: none;
+  border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer;
+}
+
+/* 空态 */
+.empty-state { text-align: center; padding: 60px 20px; display: none; }
+.empty-state.show { display: block; }
+.empty-state .icon { font-size: 48px; }
+.empty-state p { font-size: 16px; color: #8e8e93; margin-top: 12px; }
+
+/* 底部操作栏 */
+.bottom-bar {
+  background: #fff; border-top: 1px solid #e5e5ea; padding: 12px 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.filter-row {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.filter-row select {
+  flex: 1.2; min-width: 120px; padding: 8px 10px; border: 1px solid #ddd;
+  border-radius: 8px; font-size: 13px; background: #fff;
+}
+.toggle-group { display: flex; gap: 16px; font-size: 13px; align-items: center; }
+.toggle-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.nav-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.nav-btn {
+  padding: 10px 18px; border: 1px solid #ddd; border-radius: 10px;
+  background: #fff; font-size: 14px; cursor: pointer; font-weight: 500;
+  white-space: nowrap;
+}
+.nav-btn:disabled { opacity: 0.4; cursor: default; }
+.nav-btn.primary { background: #007aff; color: #fff; border-color: #007aff; }
+.score-text { font-size: 14px; font-weight: 600; color: #007aff; text-align: center; }
+
+/* 加载/错误遮罩 */
+.loading-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: #fff; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 16px; z-index: 999;
+}
+.loading-overlay.hidden { display: none; }
+.loading-overlay .spinner {
+  width: 40px; height: 40px; border: 4px solid #e5e5ea;
+  border-top-color: #007aff; border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-overlay .error-msg { color: #ff3b30; font-size: 14px; text-align: center; padding: 0 30px; }
+.loading-overlay .file-input-label {
+  padding: 12px 24px; background: #007aff; color: #fff; border-radius: 10px;
+  font-size: 15px; cursor: pointer; font-weight: 600;
+}
+
+/* 响应式 */
+@media (max-width: 480px) {
+  .app { max-width: 100%; }
+  .stem { font-size: 16px; }
+  .option-btn { padding: 12px 14px; font-size: 14px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- 信息栏 -->
+  <div class="header" id="header">
+    <div>
+      <div class="topic" id="topicLabel">📂 题库加载中...</div>
+      <div class="difficulty" id="difficultyLabel"></div>
+    </div>
+    <div class="progress-text" id="progressLabel"></div>
+  </div>
+  <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar" style="width:0%"></div></div>
+
+  <!-- 内容区 -->
+  <div class="content" id="content">
+    <!-- 完成界面 -->
+    <div class="completion" id="completion">
+      <div class="icon" id="completionIcon">🎉</div>
+      <div class="title" id="completionTitle"></div>
+      <div class="detail" id="completionDetail"></div>
+      <button class="restart-btn" onclick="goRestart()">🔄 重新开始</button>
+    </div>
+    <!-- 空态 -->
+    <div class="empty-state" id="emptyState"><div class="icon">📭</div><p>当前筛选条件下没有题目</p></div>
+    <!-- 题目 -->
+    <div class="qtype-chip" id="qtypeChip">题目</div>
+    <div class="stem" id="stemText"></div>
+    <button class="option-btn" data-letter="A" id="optA"></button>
+    <button class="option-btn" data-letter="B" id="optB"></button>
+    <button class="option-btn" data-letter="C" id="optC"></button>
+    <button class="option-btn" data-letter="D" id="optD"></button>
+    <div class="explanation-box" id="explanationBox">
+      <h4>📖 解析</h4>
+      <p id="explanationText"></p>
+    </div>
+  </div>
+
+  <!-- 底部栏 -->
+  <div class="bottom-bar" id="bottomBar">
+    <div class="filter-row">
+      <select id="categorySelect" onchange="onCategoryChange()">
+        <option value="全部">📂 全部</option>
+      </select>
+      <div class="toggle-group">
+        <label><input type="checkbox" id="randomToggle" onchange="onRandomToggle()"> 🎲 随机</label>
+        <label><input type="checkbox" id="wrongToggle" onchange="onWrongToggle()"> 📝 错题本(<span id="wrongCount">0</span>)</label>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="nav-btn" id="btnPrev" onclick="goPrev()">◀ 上一题</button>
+      <span class="score-text" id="scoreText"></span>
+      <button class="nav-btn primary" id="btnNext" onclick="goNext()">下一题 ▶</button>
+    </div>
+    <div style="text-align:center">
+      <button class="nav-btn" onclick="goRandom()">🎲 随机跳转</button>
+    </div>
+  </div>
+</div>
+
+<!-- 文件加载遮罩 -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner" id="spinner"></div>
+  <p id="loadingText">正在加载题库...</p>
+  <p id="loadingHint" style="color:#8e8e93;font-size:13px">请在项目目录放置 questions.xls 文件</p>
+  <label class="file-input-label" id="fileInputLabel" style="display:none">
+    📁 手动选择题库文件 (.xls / .xlsx)
+    <input type="file" id="fileInput" accept=".xls,.xlsx" style="display:none" onchange="onFileSelect(event)">
+  </label>
+  <div class="error-msg" id="errorMsg" style="display:none"></div>
+</div>
+
+<script>
+/* ========== 数据模型 ========== */
+const COLUMN_MAP = {
+  "题目类型": "qtype", "选择题题干": "stem", "正确答案": "answer",
+  "答案解析": "explanation", "难易度": "difficulty", "知识点": "topic",
+  "标签": "tags", "选项数": "opt_count",
+  "选项A": "opt_a", "选项B": "opt_b", "选项C": "opt_c", "选项D": "opt_d",
+  "选项 A": "opt_a", "选项 B": "opt_b", "选项 C": "opt_c", "选项 D": "opt_d",
+};
+
+let DF = [];          // 全部题目
+let filteredDF = [];  // 当前筛选子集
+let currentIndex = 0;
+let answered = false;
+let isRandom = false;
+let selectedCategory = "全部";
+let wrongOnly = false;
+let wrongSet = new Set();     // 错题在 DF 中的索引
+let scoreCorrect = 0;
+let scoreTotal = 0;
+let shuffledIndices = [];
+let allTopics = [];
+
+/* ========== 数据加载 ========== */
+function normalizeColumns(cols) {
+  return cols.map(c => {
+    c = (c || "").toString().trim();
+    const stripped = c.replace(/[\s　]/g, "");
+    return COLUMN_MAP[c] || COLUMN_MAP[stripped] || c;
+  });
+}
+
+function loadFromArrayBuffer(buf) {
+  try {
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (!raw.length) throw new Error("Excel 文件为空");
+    const header = normalizeColumns(raw[0]);
+    const required = ["stem", "answer"];
+    for (const r of required) {
+      if (!header.includes(r)) throw new Error(`缺少必要列：${r}。已识别列：${header.join(", ")}`);
+    }
+    DF = raw.slice(1).map((row, idx) => {
+      const obj = {};
+      header.forEach((k, i) => { obj[k] = (row[i] !== undefined ? String(row[i]).trim() : ""); });
+      obj.answer = (obj.answer || "").toUpperCase();
+      obj.__origIdx = idx;
+      return obj;
+    });
+    // 过滤无效行
+    DF = DF.filter(r => r.stem && /^[ABCD]$/.test(r.answer));
+    if (!DF.length) throw new Error("题库中无有效题目");
+    allTopics = [...new Set(DF.map(r => r.topic || "未分类").filter(Boolean))].sort();
+    populateCategoryDropdown();
+    filteredDF = [...DF];
+    renderQuestion();
+    document.getElementById("loadingOverlay").classList.add("hidden");
+  } catch (e) {
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("loadingText").textContent = "题库加载失败";
+    document.getElementById("errorMsg").textContent = e.message;
+    document.getElementById("errorMsg").style.display = "block";
+    document.getElementById("fileInputLabel").style.display = "inline-block";
+    document.getElementById("loadingHint").style.display = "none";
+  }
+}
+
+async function loadDefaultFile() {
+  const paths = ["questions.xls", "questions.xlsx"];
+  for (const p of paths) {
+    try {
+      const resp = await fetch(p);
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        if (buf.byteLength > 100) { loadFromArrayBuffer(buf); return; }
+      }
+    } catch (e) {}
+  }
+  // 自动加载失败，显示手动选择
+  document.getElementById("spinner").style.display = "none";
+  document.getElementById("loadingText").textContent = "未检测到题库文件";
+  document.getElementById("loadingHint").style.display = "none";
+  document.getElementById("fileInputLabel").style.display = "inline-block";
+}
+
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("spinner").style.display = "block";
+  document.getElementById("loadingText").textContent = "正在解析...";
+  document.getElementById("errorMsg").style.display = "none";
+  document.getElementById("fileInputLabel").style.display = "none";
+  document.getElementById("loadingHint").style.display = "none";
+  const reader = new FileReader();
+  reader.onload = () => loadFromArrayBuffer(reader.result);
+  reader.readAsArrayBuffer(file);
+}
+
+/* ========== 筛选 ========== */
+function populateCategoryDropdown() {
+  const sel = document.getElementById("categorySelect");
+  sel.innerHTML = '<option value="全部">📂 全部</option>';
+  allTopics.forEach(t => { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); });
+}
+
+function applyFilter() {
+  if (wrongOnly && wrongSet.size > 0) {
+    const indices = [...wrongSet];
+    filteredDF = indices.map(i => DF[i]).filter(Boolean);
+  } else if (selectedCategory === "全部") {
+    filteredDF = [...DF];
+  } else {
+    filteredDF = DF.filter(r => r.topic === selectedCategory);
+  }
+  currentIndex = 0; answered = false; shuffledIndices = [];
+  if (isRandom && filteredDF.length > 0) shuffle();
+}
+
+function shuffle() {
+  shuffledIndices = Array.from({ length: filteredDF.length }, (_, i) => i);
+  for (let i = shuffledIndices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
+  }
+}
+
+function effectiveIndex() {
+  return (isRandom && shuffledIndices.length) ? shuffledIndices[currentIndex] : currentIndex;
+}
+
+/* ========== 导航 ========== */
+function goPrev() {
+  if (currentIndex > 0) { currentIndex--; answered = false; renderQuestion(); }
+}
+function goNext() {
+  if (currentIndex < filteredDF.length - 1) { currentIndex++; answered = false; renderQuestion(); }
+  else if (currentIndex === filteredDF.length - 1) { currentIndex++; renderQuestion(); }
+}
+function goRestart() {
+  currentIndex = 0; answered = false; scoreCorrect = 0; scoreTotal = 0;
+  wrongSet.clear();
+  if (isRandom && filteredDF.length > 0) shuffle();
+  renderQuestion();
+}
+function goRandom() {
+  if (filteredDF.length <= 1) return;
+  let old = currentIndex;
+  while (currentIndex === old && filteredDF.length > 1) {
+    currentIndex = Math.floor(Math.random() * filteredDF.length);
+  }
+  answered = false; renderQuestion();
+}
+
+/* ========== 选项点击 ========== */
+document.getElementById("optA").addEventListener("click", () => onSelect("A"));
+document.getElementById("optB").addEventListener("click", () => onSelect("B"));
+document.getElementById("optC").addEventListener("click", () => onSelect("C"));
+document.getElementById("optD").addEventListener("click", () => onSelect("D"));
+
+function onSelect(chosen) {
+  if (answered || filteredDF.length === 0) return;
+  answered = true; scoreTotal++;
+  const row = filteredDF[effectiveIndex()];
+  const correct = (row.answer || "").toUpperCase();
+  const isCorrect = (chosen === correct);
+  if (isCorrect) { scoreCorrect++; }
+  else { wrongSet.add(row.__origIdx); }
+  showFeedback(chosen, correct, row);
+  updateInfoBar();
+  saveState();
+}
+
+function showFeedback(chosen, correct, row) {
+  ["A","B","C","D"].forEach(letter => {
+    const btn = document.getElementById("opt" + letter);
+    btn.disabled = true;
+    btn.classList.remove("correct", "wrong");
+    if (letter === correct) btn.classList.add("correct");
+    else if (letter === chosen && chosen !== correct) btn.classList.add("wrong");
+  });
+  const expBox = document.getElementById("explanationBox");
+  const expText = document.getElementById("explanationText");
+  const correctText = row["opt_" + correct.toLowerCase()] || "";
+  let txt = "✅ 正确答案：" + correct + ". " + correctText;
+  if (row.explanation) txt += "\n\n" + row.explanation;
+  expText.textContent = txt;
+  expBox.classList.add("show");
+}
+
+/* ========== 渲染 ========== */
+function renderQuestion() {
+  const completion = document.getElementById("completion");
+  const emptyState = document.getElementById("emptyState");
+  const qtypeChip = document.getElementById("qtypeChip");
+  const stemText = document.getElementById("stemText");
+  const expBox = document.getElementById("explanationBox");
+  ["A","B","C","D"].forEach(l => {
+    const btn = document.getElementById("opt" + l);
+    btn.style.display = "block";
+    btn.disabled = false;
+    btn.classList.remove("correct", "wrong");
+  });
+  expBox.classList.remove("show");
+
+  if (filteredDF.length === 0) {
+    completion.classList.remove("show");
+    [qtypeChip, stemText, "optA","optB","optC","optD"].forEach(id => document.getElementById(id).style.display = "none");
+    emptyState.classList.add("show");
+    document.getElementById("btnPrev").disabled = true;
+    document.getElementById("btnNext").disabled = true;
+    document.getElementById("scoreText").textContent = "";
+    document.getElementById("topicLabel").textContent = "📭 无题目";
+    document.getElementById("progressLabel").textContent = "";
+    document.getElementById("progressBar").style.width = "0%";
+    return;
+  }
+  emptyState.classList.remove("show");
+
+  if (currentIndex >= filteredDF.length) {
+    // 完成界面
+    completion.classList.add("show");
+    ["qtypeChip","stemText","optA","optB","optC","optD"].forEach(id => document.getElementById(id).style.display = "none");
+    const total = scoreTotal, correct = scoreCorrect;
+    const pct = total > 0 ? Math.round(correct / total * 100) : 0;
+    const wrong = total - correct;
+    document.getElementById("completionIcon").textContent = pct >= 60 ? "🎉" : "🔄";
+    document.getElementById("completionTitle").textContent =
+      "🎉 本轮刷题结束！\n正确率：" + correct + "/" + total + "（" + pct + "%）";
+    document.getElementById("completionDetail").innerHTML =
+      "✅ 正确：" + correct + " 题<br>" +
+      "❌ 错误：" + wrong + " 题<br>" +
+      "📝 错题本累计：" + wrongSet.size + " 题<br>" +
+      "📂 当前分类：" + selectedCategory;
+    document.getElementById("btnPrev").style.display = "none";
+    document.getElementById("btnNext").style.display = "none";
+    document.getElementById("scoreText").textContent = "";
+    document.getElementById("progressLabel").textContent = "🏁 完成";
+    document.getElementById("progressBar").style.width = "100%";
+    document.getElementById("categorySelect").style.display = "none";
+    document.getElementById("randomToggle").parentElement.parentElement.style.display = "none";
+    document.getElementById("wrongToggle").parentElement.parentElement.style.display = "none";
+    return;
+  }
+  completion.classList.remove("show");
+  ["qtypeChip","stemText","optA","optB","optC","optD","categorySelect"].forEach(id => document.getElementById(id).style.display = "");
+  document.getElementById("randomToggle").parentElement.parentElement.style.display = "";
+  document.getElementById("wrongToggle").parentElement.parentElement.style.display = "";
+  document.getElementById("btnPrev").style.display = "";
+  document.getElementById("btnNext").style.display = "";
+  document.getElementById("btnPrev").disabled = (currentIndex === 0);
+  document.getElementById("btnNext").disabled = (currentIndex >= filteredDF.length - 1);
+
+  const row = filteredDF[effectiveIndex()];
+  document.getElementById("topicLabel").textContent = "🏷️ 知识点：" + (row.topic || "未分类");
+  document.getElementById("difficultyLabel").textContent =
+    "⭐ 难度：" + (row.difficulty || "未知") + " | 📋 " + (row.qtype || "题目");
+  document.getElementById("progressLabel").textContent = "🔢 " + (currentIndex + 1) + " / " + filteredDF.length;
+  document.getElementById("progressBar").style.width = ((currentIndex + 1) / filteredDF.length * 100) + "%";
+  document.getElementById("qtypeChip").textContent = row.qtype || "题目";
+  document.getElementById("qtypeChip").style.display = row.qtype ? "" : "none";
+  document.getElementById("stemText").textContent = row.stem;
+
+  ["A","B","C","D"].forEach(letter => {
+    const btn = document.getElementById("opt" + letter);
+    const txt = row["opt_" + letter.toLowerCase()];
+    if (txt) { btn.textContent = letter + ". " + txt; btn.style.display = "block"; }
+    else { btn.style.display = "none"; }
+  });
+
+  updateScoreText();
+  document.getElementById("wrongCount").textContent = wrongSet.size;
+  document.getElementById("randomToggle").checked = isRandom;
+  document.getElementById("wrongToggle").checked = wrongOnly;
+  document.getElementById("categorySelect").value = selectedCategory;
+}
+
+function updateInfoBar() {
+  const row = filteredDF[effectiveIndex()] || {};
+  document.getElementById("difficultyLabel").textContent =
+    "⭐ 难度：" + (row.difficulty || "未知") + " | 📋 " + (row.qtype || "题目");
+  document.getElementById("progressBar").style.width = ((currentIndex + 1) / filteredDF.length * 100) + "%";
+}
+
+function updateScoreText() {
+  if (scoreTotal > 0) {
+    const pct = Math.round(scoreCorrect / scoreTotal * 100);
+    document.getElementById("scoreText").textContent = "✅ " + scoreCorrect + " / " + scoreTotal + " (" + pct + "%)";
+  } else {
+    document.getElementById("scoreText").textContent = "";
+  }
+}
+
+/* ========== 事件 ========== */
+function onCategoryChange() {
+  selectedCategory = document.getElementById("categorySelect").value;
+  wrongOnly = false;
+  document.getElementById("wrongToggle").checked = false;
+  applyFilter(); renderQuestion(); saveState();
+}
+function onRandomToggle() {
+  isRandom = document.getElementById("randomToggle").checked;
+  if (isRandom && filteredDF.length > 0) { shuffle(); currentIndex = 0; }
+  else { shuffledIndices = []; currentIndex = 0; }
+  answered = false; renderQuestion(); saveState();
+}
+function onWrongToggle() {
+  wrongOnly = document.getElementById("wrongToggle").checked;
+  if (wrongOnly) {
+    isRandom = false; document.getElementById("randomToggle").checked = false;
+    document.getElementById("categorySelect").value = "全部"; selectedCategory = "全部";
+  }
+  applyFilter(); renderQuestion(); saveState();
+}
+
+/* ========== 持久化 ========== */
+function saveState() {
+  try {
+    localStorage.setItem("quiz-wrongSet", JSON.stringify([...wrongSet]));
+    localStorage.setItem("quiz-scoreCorrect", scoreCorrect);
+    localStorage.setItem("quiz-scoreTotal", scoreTotal);
+  } catch(e) {}
+}
+function loadState() {
+  try {
+    const ws = JSON.parse(localStorage.getItem("quiz-wrongSet"));
+    if (Array.isArray(ws)) wrongSet = new Set(ws);
+    scoreCorrect = parseInt(localStorage.getItem("quiz-scoreCorrect")) || 0;
+    scoreTotal = parseInt(localStorage.getItem("quiz-scoreTotal")) || 0;
+  } catch(e) {}
+}
+
+/* ========== 启动 ========== */
+loadState();
+loadDefaultFile();
+</script>
+</body>
+</html>

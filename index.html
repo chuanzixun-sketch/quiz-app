@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>刷题 App</title>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -201,24 +200,16 @@ body {
 <div class="loading-overlay" id="loadingOverlay">
   <div class="spinner" id="spinner"></div>
   <p id="loadingText">正在加载题库...</p>
-  <p id="loadingHint" style="color:#8e8e93;font-size:13px">请在项目目录放置 questions.xls 文件</p>
+  <p id="loadingHint" style="color:#8e8e93;font-size:13px">正在加载题库数据...</p>
   <label class="file-input-label" id="fileInputLabel" style="display:none">
-    📁 手动选择题库文件 (.xls / .xlsx)
-    <input type="file" id="fileInput" accept=".xls,.xlsx" style="display:none" onchange="onFileSelect(event)">
+    📁 手动选择题库文件 (.json / .xls / .xlsx)
+    <input type="file" id="fileInput" accept=".json,.xls,.xlsx" style="display:none" onchange="onFileSelect(event)">
   </label>
   <div class="error-msg" id="errorMsg" style="display:none"></div>
 </div>
 
 <script>
 /* ========== 数据模型 ========== */
-const COLUMN_MAP = {
-  "题目类型": "qtype", "选择题题干": "stem", "正确答案": "answer",
-  "答案解析": "explanation", "难易度": "difficulty", "知识点": "topic",
-  "标签": "tags", "选项数": "opt_count",
-  "选项A": "opt_a", "选项B": "opt_b", "选项C": "opt_c", "选项D": "opt_d",
-  "选项 A": "opt_a", "选项 B": "opt_b", "选项 C": "opt_c", "选项 D": "opt_d",
-};
-
 let DF = [];          // 全部题目
 let filteredDF = [];  // 当前筛选子集
 let currentIndex = 0;
@@ -226,73 +217,109 @@ let answered = false;
 let isRandom = false;
 let selectedCategory = "全部";
 let wrongOnly = false;
-let wrongSet = new Set();     // 错题在 DF 中的索引
+let wrongSet = new Set();     // 错题在 DF 中的原始索引
 let scoreCorrect = 0;
 let scoreTotal = 0;
 let shuffledIndices = [];
 let allTopics = [];
 
 /* ========== 数据加载 ========== */
-function normalizeColumns(cols) {
-  return cols.map(c => {
-    c = (c || "").toString().trim();
-    const stripped = c.replace(/[\s　]/g, "");
-    return COLUMN_MAP[c] || COLUMN_MAP[stripped] || c;
-  });
+function initData(data) {
+  // data is an array of question objects with keys: stem, answer, qtype, explanation, difficulty, topic, tags, opt_count, opt_a, opt_b, opt_c, opt_d
+  DF = data.filter(r => r.stem && /^[ABCD]$/.test((r.answer || "").toUpperCase()));
+  if (!DF.length) throw new Error("题库中无有效题目");
+  // Add __origIdx for wrongSet tracking
+  DF.forEach((r, i) => { r.answer = (r.answer || "").toUpperCase(); r.__origIdx = i; });
+  allTopics = [...new Set(DF.map(r => r.topic || "未分类").filter(Boolean))].sort();
+  populateCategoryDropdown();
+  filteredDF = [...DF];
+  renderQuestion();
+  document.getElementById("loadingOverlay").classList.add("hidden");
 }
 
-function loadFromArrayBuffer(buf) {
+async function loadDefaultFile() {
+  // Try JSON first (fast, no dependencies)
+  try {
+    const resp = await fetch("questions.json");
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.length > 0) { initData(data); return; }
+    }
+  } catch (e) { console.warn("JSON load failed, trying Excel fallback:", e.message); }
+
+  // Fallback: try Excel files via dynamic SheetJS import
+  const excelPaths = ["questions.xls", "questions.xlsx"];
+  for (const p of excelPaths) {
+    try {
+      const resp = await fetch(p);
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        if (buf.byteLength > 100) {
+          // Dynamically load SheetJS for Excel parsing
+          await loadSheetJS();
+          loadFromExcel(buf); return;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // All auto-load methods failed
+  document.getElementById("spinner").style.display = "none";
+  document.getElementById("loadingText").textContent = "未检测到题库文件";
+  document.getElementById("loadingHint").style.display = "none";
+  document.getElementById("fileInputLabel").style.display = "inline-block";
+}
+
+/* ── SheetJS 动态加载（仅 Excel 文件时触发）── */
+let _sheetjsReady = null;
+function loadSheetJS() {
+  if (_sheetjsReady) return _sheetjsReady;
+  _sheetjsReady = new Promise((resolve, reject) => {
+    if (typeof XLSX !== "undefined") { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("SheetJS CDN 加载失败"));
+    document.head.appendChild(s);
+  });
+  return _sheetjsReady;
+}
+
+function loadFromExcel(buf) {
   try {
     const wb = XLSX.read(buf, { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
     if (!raw.length) throw new Error("Excel 文件为空");
-    const header = normalizeColumns(raw[0]);
-    const required = ["stem", "answer"];
-    for (const r of required) {
-      if (!header.includes(r)) throw new Error(`缺少必要列：${r}。已识别列：${header.join(", ")}`);
+
+    // Normalize header
+    const COL_MAP = {
+      "题目类型": "qtype", "选择题题干": "stem", "正确答案": "answer",
+      "答案解析": "explanation", "难易度": "difficulty", "知识点": "topic",
+      "标签": "tags", "选项数": "opt_count",
+      "选项A": "opt_a", "选项B": "opt_b", "选项C": "opt_c", "选项D": "opt_d",
+    };
+    const header = (raw[0] || []).map(c => {
+      const key = (c || "").toString().trim().replace(/[\s　]/g, "");
+      return COL_MAP[key] || key;
+    });
+    if (!header.includes("stem") || !header.includes("answer")) {
+      throw new Error("缺少必要列：stem/answer。已识别列：" + header.join(", "));
     }
-    DF = raw.slice(1).map((row, idx) => {
+    const data = raw.slice(1).map(row => {
       const obj = {};
       header.forEach((k, i) => { obj[k] = (row[i] !== undefined ? String(row[i]).trim() : ""); });
-      obj.answer = (obj.answer || "").toUpperCase();
-      obj.__origIdx = idx;
       return obj;
     });
-    // 过滤无效行
-    DF = DF.filter(r => r.stem && /^[ABCD]$/.test(r.answer));
-    if (!DF.length) throw new Error("题库中无有效题目");
-    allTopics = [...new Set(DF.map(r => r.topic || "未分类").filter(Boolean))].sort();
-    populateCategoryDropdown();
-    filteredDF = [...DF];
-    renderQuestion();
-    document.getElementById("loadingOverlay").classList.add("hidden");
+    initData(data);
   } catch (e) {
     document.getElementById("spinner").style.display = "none";
-    document.getElementById("loadingText").textContent = "题库加载失败";
+    document.getElementById("loadingText").textContent = "Excel 解析失败";
     document.getElementById("errorMsg").textContent = e.message;
     document.getElementById("errorMsg").style.display = "block";
     document.getElementById("fileInputLabel").style.display = "inline-block";
     document.getElementById("loadingHint").style.display = "none";
   }
-}
-
-async function loadDefaultFile() {
-  const paths = ["questions.xls", "questions.xlsx"];
-  for (const p of paths) {
-    try {
-      const resp = await fetch(p);
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        if (buf.byteLength > 100) { loadFromArrayBuffer(buf); return; }
-      }
-    } catch (e) {}
-  }
-  // 自动加载失败，显示手动选择
-  document.getElementById("spinner").style.display = "none";
-  document.getElementById("loadingText").textContent = "未检测到题库文件";
-  document.getElementById("loadingHint").style.display = "none";
-  document.getElementById("fileInputLabel").style.display = "inline-block";
 }
 
 function onFileSelect(e) {
@@ -303,9 +330,41 @@ function onFileSelect(e) {
   document.getElementById("errorMsg").style.display = "none";
   document.getElementById("fileInputLabel").style.display = "none";
   document.getElementById("loadingHint").style.display = "none";
+
+  const ext = (file.name || "").split(".").pop().toLowerCase();
   const reader = new FileReader();
-  reader.onload = () => loadFromArrayBuffer(reader.result);
-  reader.readAsArrayBuffer(file);
+
+  if (ext === "json") {
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error("JSON 格式错误：需要题目数组");
+        initData(data);
+      } catch (e) {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("loadingText").textContent = "JSON 解析失败";
+        document.getElementById("errorMsg").textContent = e.message;
+        document.getElementById("errorMsg").style.display = "block";
+        document.getElementById("fileInputLabel").style.display = "inline-block";
+      }
+    };
+    reader.readAsText(file);
+  } else {
+    // Excel files — load SheetJS dynamically
+    reader.onload = async () => {
+      try {
+        await loadSheetJS();
+        loadFromExcel(reader.result);
+      } catch (e) {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("loadingText").textContent = "解析失败";
+        document.getElementById("errorMsg").textContent = e.message;
+        document.getElementById("errorMsg").style.display = "block";
+        document.getElementById("fileInputLabel").style.display = "inline-block";
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
 }
 
 /* ========== 筛选 ========== */
